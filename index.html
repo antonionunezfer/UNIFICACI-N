@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<title>Amazon SVQ1 + DQA4 — Vista 3D</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0e1a; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+  canvas { display: block; }
+
+  #ui {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 18px 24px; pointer-events: none; z-index: 10;
+  }
+  .logo-bar {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .amazon-badge {
+    background: #232f3e; border-radius: 8px; padding: 6px 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+  }
+  .amazon-badge span { color: #FF9900; font-weight: 800; font-size: 20px; letter-spacing: 1px; }
+  .title-block h1 { color: #fff; font-size: 15px; font-weight: 700; letter-spacing: 0.5px; }
+  .title-block p  { color: #8aaccc; font-size: 11px; margin-top: 2px; }
+
+  .legend {
+    background: rgba(10,14,30,0.85); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.10); border-radius: 10px;
+    padding: 14px 16px; pointer-events: all;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    min-width: 200px;
+  }
+  .legend h3 { color: #8aaccc; font-size: 10px; letter-spacing: 2px;
+    text-transform: uppercase; margin-bottom: 10px; }
+  .leg-item { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .leg-dot  { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+  .leg-label{ color: #cde; font-size: 11px; font-weight: 600; }
+  .leg-sub  { color: #8aaccc; font-size: 10px; margin-top: 1px; }
+
+  #controls {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; pointer-events: all; z-index: 10;
+  }
+  .ctrl-btn {
+    background: rgba(10,14,30,0.85); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+    color: #8aaccc; font-size: 12px; padding: 8px 16px; cursor: pointer;
+    transition: all 0.2s; font-family: inherit;
+  }
+  .ctrl-btn:hover { background: rgba(30,60,100,0.85); color: #fff; border-color: #4a8abf; }
+
+  #hint {
+    position: fixed; bottom: 20px; right: 24px;
+    color: rgba(138,172,204,0.6); font-size: 10px; letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .belt-label {
+    position: fixed; pointer-events: none;
+    background: rgba(224,92,0,0.9); color: #fff;
+    font-size: 10px; font-weight: 700; padding: 3px 8px;
+    border-radius: 4px; letter-spacing: 0.5px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div class="logo-bar">
+    <div class="amazon-badge"><span>amazon</span></div>
+    <div class="title-block">
+      <h1>SVQ1 &amp; DQA4 — Integración de Centros</h1>
+      <p>Vista 3D · Terminal de Clasificación e Inyección Directa por Cinta</p>
+    </div>
+  </div>
+  <div class="legend">
+    <h3>Leyenda</h3>
+    <div class="leg-item"><div class="leg-dot" style="background:#4a9be8"></div>
+      <div><div class="leg-label">SVQ1 — Nave Principal</div>
+      <div class="leg-sub">85.000 m² · Dos Hermanas</div></div></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#2a7abf"></div>
+      <div><div class="leg-label">DQA4 — Nave Anexa</div>
+      <div class="leg-sub">12.500 m² · Dir. Cádiz</div></div></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#FF6600"></div>
+      <div><div class="leg-label">Cinta Transportadora</div>
+      <div class="leg-sub">Inyección directa SVQ1 → DQA4</div></div></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#00c9a7"></div>
+      <div><div class="leg-label">Flujo Cross-Docking</div>
+      <div class="leg-sub">Inbound → DQA4 directo</div></div></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#FFD700"></div>
+      <div><div class="leg-label">Puente / Pasarela</div>
+      <div class="leg-sub">Conexión entre naves</div></div></div>
+  </div>
+</div>
+
+<div id="controls">
+  <button class="ctrl-btn" onclick="setCam('front')">Vista Frontal</button>
+  <button class="ctrl-btn" onclick="setCam('top')">Vista Cenital</button>
+  <button class="ctrl-btn" onclick="setCam('iso')">Vista Isométrica</button>
+  <button class="ctrl-btn" onclick="setCam('inside')">Vista Interior</button>
+  <button class="ctrl-btn" id="toggleRoof" onclick="toggleRoof()">Quitar Techo</button>
+</div>
+<div id="hint">🖱 Arrastra para rotar · Scroll para zoom</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─── SCENE SETUP ────────────────────────────────────────────────────────────
+const W = window.innerWidth, H = window.innerHeight;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(W, H);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0e1a);
+scene.fog = new THREE.FogExp2(0x0a0e1a, 0.012);
+
+const camera = new THREE.PerspectiveCamera(50, W / H, 0.1, 500);
+camera.position.set(-60, 45, 75);
+camera.lookAt(0, 0, 0);
+
+// ─── LIGHTING ───────────────────────────────────────────────────────────────
+const ambient = new THREE.AmbientLight(0x334466, 0.8);
+scene.add(ambient);
+
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+sun.position.set(40, 80, 40);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 0.1;
+sun.shadow.camera.far = 300;
+sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
+sun.shadow.camera.top = 80;   sun.shadow.camera.bottom = -80;
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0x4466aa, 0.6);
+fill.position.set(-30, 20, -20);
+scene.add(fill);
+
+// Point lights inside buildings
+const ptSVQ1 = new THREE.PointLight(0xffeedd, 1.5, 60);
+ptSVQ1.position.set(12, 8, 0);
+scene.add(ptSVQ1);
+const ptDQA4 = new THREE.PointLight(0xddeeff, 1.5, 40);
+ptDQA4.position.set(-38, 8, 0);
+scene.add(ptDQA4);
+
+// ─── HELPERS ────────────────────────────────────────────────────────────────
+function box(w, h, d, color, opacity=1, metal=0.15, rough=0.7) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshStandardMaterial({
+    color, transparent: opacity < 1, opacity,
+    metalness: metal, roughness: rough,
+    side: opacity < 1 ? THREE.DoubleSide : THREE.FrontSide
+  });
+  const m = new THREE.Mesh(geo, mat);
+  m.castShadow = true; m.receiveShadow = true;
+  return m;
+}
+
+function addText3D(text, x, y, z, color=0xffffff, size=0.8) {
+  // Canvas texture label
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0)';
+  ctx.fillRect(0,0,512,128);
+  ctx.fillStyle = `#${color.toString(16).padStart(6,'0')}`;
+  ctx.font = 'bold 32px "Segoe UI", Arial';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 256, 64);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.set(x, y, z);
+  sprite.scale.set(size * 5, size * 1.25, 1);
+  scene.add(sprite);
+  return sprite;
+}
+
+// ─── GROUND ─────────────────────────────────────────────────────────────────
+const groundGeo = new THREE.PlaneGeometry(200, 150);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a1f2e, roughness: 0.95 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Road markings
+function roadLine(x, z, len, horiz) {
+  const geo = horiz
+    ? new THREE.PlaneGeometry(len, 0.15)
+    : new THREE.PlaneGeometry(0.15, len);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x444455 });
+  const m = new THREE.Mesh(geo, mat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, 0.01, z);
+  scene.add(m);
+}
+for (let i = -30; i < 80; i += 4) roadLine(-22, i - 50, 3, true);
+
+// ─── SVQ1 BUILDING (right, larger) ──────────────────────────────────────────
+const SVQ1 = new THREE.Group();
+scene.add(SVQ1);
+SVQ1.position.set(15, 0, 0);
+
+// Floor
+const svqFloor = box(58, 0.3, 44, 0x2a3050);
+svqFloor.position.set(0, 0.15, 0);
+SVQ1.add(svqFloor);
+
+// Walls
+const wMat = new THREE.MeshStandardMaterial({ color: 0x8ea8c8, metalness: 0.3, roughness: 0.6 });
+const wMatDark = new THREE.MeshStandardMaterial({ color: 0x5a7a9a, metalness: 0.4, roughness: 0.5 });
+
+function wallPanel(wx, wy, wz, color, rx=0, ry=0, rz=0) {
+  const g = new THREE.BoxGeometry(wx, wy, wz);
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({color, metalness:0.3, roughness:0.55}));
+  m.rotation.set(rx, ry, rz);
+  m.castShadow = true;
+  return m;
+}
+
+// Front wall (south)
+const svqFront = wallPanel(58, 12, 0.5, 0x8ea8c8);
+svqFront.position.set(0, 6, 22);
+SVQ1.add(svqFront);
+// Back wall (north)
+const svqBack = wallPanel(58, 12, 0.5, 0x6a8aaa);
+svqBack.position.set(0, 6, -22);
+SVQ1.add(svqBack);
+// Right wall (east)
+const svqRight = wallPanel(0.5, 12, 44, 0x7a9ab8);
+svqRight.position.set(29, 6, 0);
+SVQ1.add(svqRight);
+// Left wall (west - facing DQA4)
+const svqLeft = wallPanel(0.5, 12, 44, 0x9abcd4);
+svqLeft.position.set(-29, 6, 0);
+SVQ1.add(svqLeft);
+
+// Roof panels — stored so we can toggle
+const roofMeshes = [];
+const roofMat = new THREE.MeshStandardMaterial({ color: 0x3a5070, metalness: 0.5, roughness: 0.4,
+  transparent: true, opacity: 1 });
+// Main roof
+const svqRoof = new THREE.Mesh(new THREE.BoxGeometry(58.5, 0.6, 44.5), roofMat);
+svqRoof.position.set(0, 12.3, 0);
+svqRoof.castShadow = true;
+SVQ1.add(svqRoof); roofMeshes.push(svqRoof);
+
+// Skylights
+for (let i = -20; i <= 20; i += 8) {
+  const sky = new THREE.Mesh(
+    new THREE.BoxGeometry(5, 0.1, 3),
+    new THREE.MeshStandardMaterial({ color: 0xaad4ff, transparent: true, opacity: 0.6, emissive: 0x334466, emissiveIntensity: 0.3 })
+  );
+  sky.position.set(i, 12.7, 0);
+  SVQ1.add(sky); roofMeshes.push(sky);
+}
+
+// ── Interior zones SVQ1
+function zone(w, d, color, px, pz, h=0.25, label='') {
+  const g = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.8 })
+  );
+  g.position.set(px, 0.28, pz);
+  SVQ1.add(g);
+  if (label) addText3D(label, SVQ1.position.x + px, 1.4, SVQ1.position.z + pz, 0xffffff, 0.55);
+}
+
+// Dock / paletización
+zone(14, 8, 0xd4c44a, -18, -16, 0.3, 'PALETIZ. MANUAL');
+// Auto SLAM
+zone(10, 7, 0xf0a0c8, 2, -12, 0.3, 'AUTO SLAM');
+// AFE pack lines
+zone(10, 7, 0x60c8e8, 2, -4, 0.3, 'AFE LINES');
+// Terminal (★ nueva, naranja)
+zone(9, 7, 0xFF8C00, -6, -4, 0.4, 'TERMINAL');
+// Clasificador plano
+zone(9, 12, 0x9b59b6, 16, -8, 0.3, 'CLASIFICADOR');
+// Líneas recepción
+zone(7, 14, 0x3498db, 22, 2, 0.3, 'RECEPCIÓN');
+// Cross-docking strip
+const xdockFloor = new THREE.Mesh(
+  new THREE.BoxGeometry(34, 0.35, 2.5),
+  new THREE.MeshStandardMaterial({ color: 0x00897b, roughness: 0.7 })
+);
+xdockFloor.position.set(4, 0.32, 4);
+SVQ1.add(xdockFloor);
+addText3D('CROSS-DOCKING', SVQ1.position.x + 4, 1.3, SVQ1.position.z + 4, 0x00ffd0, 0.5);
+
+// RME area
+zone(24, 3, 0x5ba0e8, -4, 10, 0.25, 'RME');
+// Office strip
+zone(8, 5, 0x50c878, -16, 16, 0.25, 'OFICINAS');
+// Canteen
+zone(14, 5, 0x50c878, 8, 16, 0.25, 'COMEDOR');
+
+// Dock doors SVQ1 (decorative indentations)
+for (let i = -22; i <= 22; i += 8) {
+  const door = new THREE.Mesh(
+    new THREE.BoxGeometry(3.5, 4, 0.4),
+    new THREE.MeshStandardMaterial({ color: 0x1a2840 })
+  );
+  door.position.set(i, 2.5, 22.2);
+  SVQ1.add(door);
+}
+// Column support beams SVQ1
+for (let x = -25; x <= 25; x += 12) {
+  for (let z = -20; z <= 20; z += 14) {
+    const col = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 12, 0.5),
+      new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.7 })
+    );
+    col.position.set(x, 6, z);
+    SVQ1.add(col);
+  }
+}
+
+// ─── VIAL / ROAD ─────────────────────────────────────────────────────────────
+const vial = box(9, 0.05, 50, 0x242830);
+vial.position.set(-24.5, 0.03, 0);
+scene.add(vial);
+// Dashed center line
+for (let z = -22; z < 22; z += 4) {
+  const dash = box(0.2, 0.06, 2, 0xffee00);
+  dash.position.set(-24.5, 0.04, z);
+  scene.add(dash);
+}
+
+// ─── DQA4 BUILDING (left) ────────────────────────────────────────────────────
+const DQA4 = new THREE.Group();
+scene.add(DQA4);
+DQA4.position.set(-46, 0, 0);
+
+const dqaFloor = box(28, 0.3, 38, 0x1e3050);
+dqaFloor.position.set(0, 0.15, 0);
+DQA4.add(dqaFloor);
+
+const dqaWallMat = new THREE.MeshStandardMaterial({ color: 0x5a8abc, metalness: 0.4, roughness: 0.5 });
+const dqaFront = wallPanel(28, 10, 0.5, 0x6a9ace);
+dqaFront.position.set(0, 5, 19); DQA4.add(dqaFront);
+const dqaBack = wallPanel(28, 10, 0.5, 0x4a7aaa);
+dqaBack.position.set(0, 5, -19); DQA4.add(dqaBack);
+const dqaRight = wallPanel(0.5, 10, 38, 0x7aaabe);
+dqaRight.position.set(14, 5, 0); DQA4.add(dqaRight);
+const dqaLeft = wallPanel(0.5, 10, 38, 0x5a8aaa);
+dqaLeft.position.set(-14, 5, 0); DQA4.add(dqaLeft);
+
+const dqaRoof = new THREE.Mesh(new THREE.BoxGeometry(28.5, 0.5, 38.5), roofMat);
+dqaRoof.position.set(0, 10.25, 0);
+DQA4.add(dqaRoof); roofMeshes.push(dqaRoof);
+
+// DQA4 interior zones
+function dqaZone(w, d, color, px, pz, label='') {
+  const g = new THREE.Mesh(
+    new THREE.BoxGeometry(w, 0.25, d),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.8 })
+  );
+  g.position.set(px, 0.28, pz);
+  DQA4.add(g);
+  if (label) addText3D(label, DQA4.position.x + px, 1.3, DQA4.position.z + pz, 0xffffff, 0.5);
+}
+dqaZone(25, 7, 0x60c8e8,  0, -12, 'INBOUND DQA4');
+dqaZone(25, 8, 0x9b59b6,  0,  -2, 'CLASIFICACIÓN');
+dqaZone(25, 7, 0xe879a0,  0,   9, 'MUELLES SALIDA');
+dqaZone(25, 4, 0x50c878,  0,  15, 'OFICINAS DQA4');
+
+// DQA4 dock doors
+for (let z = -16; z <= 16; z += 8) {
+  const door = new THREE.Mesh(
+    new THREE.BoxGeometry(0.4, 3.5, 3),
+    new THREE.MeshStandardMaterial({ color: 0x112030 })
+  );
+  door.position.set(14.2, 2, z);
+  DQA4.add(door);
+}
+for (let x = -10; x <= 10; x += 8) {
+  for (let z = -16; z <= 16; z += 14) {
+    const col = new THREE.Mesh(
+      new THREE.BoxGeometry(0.4, 10, 0.4),
+      new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.7 })
+    );
+    col.position.set(x, 5, z);
+    DQA4.add(col);
+  }
+}
+
+// ─── BRIDGE / PASARELA ──────────────────────────────────────────────────────
+const bridgeGroup = new THREE.Group();
+scene.add(bridgeGroup);
+
+// Bridge deck
+const bridgeDeck = box(9, 0.4, 5, 0xd4b84a, 1, 0.6, 0.3);
+bridgeDeck.position.set(-24.5, 7.5, -8);
+bridgeGroup.add(bridgeDeck);
+
+// Bridge railings
+const railMat = new THREE.MeshStandardMaterial({ color: 0xffcc44, metalness: 0.8, roughness: 0.2 });
+const railTop1 = new THREE.Mesh(new THREE.BoxGeometry(9, 0.15, 0.1), railMat);
+railTop1.position.set(-24.5, 8.8, -5.6);
+bridgeGroup.add(railTop1);
+const railTop2 = new THREE.Mesh(new THREE.BoxGeometry(9, 0.15, 0.1), railMat);
+railTop2.position.set(-24.5, 8.8, -10.4);
+bridgeGroup.add(railTop2);
+
+// Bridge posts
+for (let x = -28; x <= -21; x += 2) {
+  const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.5, 0.12), railMat);
+  p1.position.set(x, 8.0, -5.6); bridgeGroup.add(p1);
+  const p2 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.5, 0.12), railMat);
+  p2.position.set(x, 8.0, -10.4); bridgeGroup.add(p2);
+}
+
+// ─── CONVEYOR BELT ──────────────────────────────────────────────────────────
+const conveyorGroup = new THREE.Group();
+scene.add(conveyorGroup);
+
+// Belt structure (orange tube-like structure)
+const beltMat = new THREE.MeshStandardMaterial({ color: 0xcc4400, metalness: 0.5, roughness: 0.4 });
+const beltSurface = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
+
+function conveyorSegment(x, y, z, len, axis='x') {
+  const g = axis === 'x'
+    ? new THREE.BoxGeometry(len, 0.35, 1.2)
+    : new THREE.BoxGeometry(1.2, 0.35, len);
+  const frame = new THREE.Mesh(g, beltMat);
+  frame.position.set(x, y, z);
+  frame.castShadow = true;
+  conveyorGroup.add(frame);
+  // Belt surface strip
+  const gs = axis === 'x'
+    ? new THREE.BoxGeometry(len, 0.05, 0.9)
+    : new THREE.BoxGeometry(0.9, 0.05, len);
+  const surf = new THREE.Mesh(gs, beltSurface);
+  surf.position.set(x, y + 0.2, z);
+  conveyorGroup.add(surf);
+}
+
+// Horizontal segment inside SVQ1 (from Terminal to west wall)
+conveyorSegment(-18, 5.2, -4, 22, 'x');
+// Bridge segment
+conveyorSegment(-24.5, 7.7, -8, 9, 'x');
+// Sloped entry from bridge down to DQA4 inbound level
+const slopeGeo = new THREE.BoxGeometry(6, 0.35, 1.2);
+const slopeFrame = new THREE.Mesh(slopeGeo, beltMat);
+slopeFrame.position.set(-32, 5.8, -8);
+slopeFrame.rotation.z = -0.35;
+slopeFrame.castShadow = true;
+conveyorGroup.add(slopeFrame);
+// Short horizontal inside DQA4
+conveyorSegment(-37, 4.5, -8, 8, 'x');
+
+// Support pillars for belt
+const pillarMat = new THREE.MeshStandardMaterial({ color: 0x994400, metalness: 0.5 });
+for (let x = -14; x >= -26; x -= 4) {
+  const pil = new THREE.Mesh(new THREE.BoxGeometry(0.3, 5.0, 0.3), pillarMat);
+  pil.position.set(x, 2.6, -4);
+  conveyorGroup.add(pil);
+}
+
+// ─── ANIMATED PACKAGES ON BELT ──────────────────────────────────────────────
+const packages = [];
+const pkgColors = [0xff6600, 0xffaa00, 0xff4400, 0xffcc00];
+for (let i = 0; i < 6; i++) {
+  const sz = 0.4 + Math.random() * 0.3;
+  const pkg = new THREE.Mesh(
+    new THREE.BoxGeometry(sz, sz * 0.7, sz * 0.8),
+    new THREE.MeshStandardMaterial({ color: pkgColors[i % 4], roughness: 0.8 })
+  );
+  pkg.position.set(-6 + i * 5, 5.55, -4);
+  pkg.castShadow = true;
+  scene.add(pkg);
+  packages.push({ mesh: pkg, offset: i * 5, phase: i / 6 });
+}
+
+// Cross-dock packages (teal)
+const xdockPkgs = [];
+for (let i = 0; i < 4; i++) {
+  const pkg = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.4, 0.55),
+    new THREE.MeshStandardMaterial({ color: 0x00c9a7, roughness: 0.8 })
+  );
+  pkg.position.set(14 - i * 4, 0.55, 4);
+  pkg.castShadow = true;
+  scene.add(pkg);
+  xdockPkgs.push({ mesh: pkg, offset: i * 4 });
+}
+
+// ─── LABELS ─────────────────────────────────────────────────────────────────
+addText3D('SVQ1', 15, 14.5, 0, 0xffeedd, 1.2);
+addText3D('DQA4', -46, 12.5, 0, 0xaad4ff, 1.0);
+addText3D('Cinta Transportadora', -24.5, 9.8, -8, 0xff8844, 0.65);
+addText3D('Puente / Pasarela', -24.5, 9.8, -5.5, 0xffdd44, 0.55);
+
+// ─── ENVIRONMENT EXTRAS ─────────────────────────────────────────────────────
+// Surrounding pavement
+const pave = box(200, 0.1, 150, 0x161a28);
+pave.position.set(0, -0.04, 0); scene.add(pave);
+
+// Street lights
+function streetLight(x, z) {
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.1, 8, 8),
+    new THREE.MeshStandardMaterial({ color: 0x556677, metalness: 0.7 })
+  );
+  pole.position.set(x, 4, z); scene.add(pole);
+  const arm = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.06, 2, 6),
+    new THREE.MeshStandardMaterial({ color: 0x556677, metalness: 0.7 })
+  );
+  arm.rotation.z = Math.PI / 2;
+  arm.position.set(x + 0.9, 7.9, z); scene.add(arm);
+  const globe = new THREE.Mesh(
+    new THREE.SphereGeometry(0.25, 8, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffffcc, emissive: 0xffffaa, emissiveIntensity: 2 })
+  );
+  globe.position.set(x + 1.7, 7.9, z); scene.add(globe);
+  const pl = new THREE.PointLight(0xfffacc, 1.2, 18);
+  pl.position.set(x + 1.7, 7.9, z); scene.add(pl);
+}
+
+for (let z = -18; z <= 18; z += 12) streetLight(-24.5, z);
+for (let z = -18; z <= 18; z += 12) streetLight(45, z);
+
+// ─── CAMERA CONTROLS (manual orbit) ─────────────────────────────────────────
+let theta = 0.55, phi = 0.58, radius = 95;
+let isDragging = false, lastX = 0, lastY = 0;
+let targetTheta = theta, targetPhi = phi, targetRadius = radius;
+
+renderer.domElement.addEventListener('mousedown', e => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
+window.addEventListener('mouseup', () => isDragging = false);
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  targetTheta -= (e.clientX - lastX) * 0.008;
+  targetPhi   -= (e.clientY - lastY) * 0.006;
+  targetPhi = Math.max(0.08, Math.min(1.4, targetPhi));
+  lastX = e.clientX; lastY = e.clientY;
+});
+window.addEventListener('wheel', e => {
+  targetRadius *= 1 + e.deltaY * 0.001;
+  targetRadius = Math.max(25, Math.min(180, targetRadius));
+});
+
+// Touch
+let lastTouchX = 0, lastTouchY = 0;
+renderer.domElement.addEventListener('touchstart', e => { lastTouchX = e.touches[0].clientX; lastTouchY = e.touches[0].clientY; });
+renderer.domElement.addEventListener('touchmove', e => {
+  targetTheta -= (e.touches[0].clientX - lastTouchX) * 0.01;
+  targetPhi   -= (e.touches[0].clientY - lastTouchY) * 0.008;
+  targetPhi = Math.max(0.08, Math.min(1.4, targetPhi));
+  lastTouchX = e.touches[0].clientX; lastTouchY = e.touches[0].clientY;
+});
+
+function setCam(view) {
+  const views = {
+    front:  { t: 0,      p: 0.4,  r: 90  },
+    top:    { t: 0,      p: 1.38, r: 85  },
+    iso:    { t: 0.55,   p: 0.58, r: 95  },
+    inside: { t: -0.1,   p: 0.25, r: 45  },
+  };
+  const v = views[view];
+  targetTheta = v.t; targetPhi = v.p; targetRadius = v.r;
+}
+
+let roofVisible = true;
+function toggleRoof() {
+  roofVisible = !roofVisible;
+  const op = roofVisible ? 1 : 0.08;
+  roofMeshes.forEach(m => {
+    m.material.opacity = op;
+    m.material.transparent = !roofVisible;
+  });
+  document.getElementById('toggleRoof').textContent = roofVisible ? 'Quitar Techo' : 'Poner Techo';
+}
+
+// ─── ANIMATE ─────────────────────────────────────────────────────────────────
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // Smooth camera
+  theta  += (targetTheta  - theta)  * 0.06;
+  phi    += (targetPhi    - phi)    * 0.06;
+  radius += (targetRadius - radius) * 0.06;
+  camera.position.set(
+    radius * Math.sin(theta) * Math.cos(phi),
+    radius * Math.sin(phi),
+    radius * Math.cos(theta) * Math.cos(phi)
+  );
+  camera.lookAt(-15, 0, -4);
+
+  // Animate belt packages (moving left toward DQA4)
+  packages.forEach((p, i) => {
+    const prog = ((t * 3 + p.phase * 28) % 28);
+    let x, y, z;
+    if (prog < 14) {
+      // Horizontal inside SVQ1
+      x = 1 - prog * 1.8; y = 5.55; z = -4;
+    } else if (prog < 17) {
+      // Up to bridge
+      const q = (prog - 14) / 3;
+      x = -24 + (q - 0.5); y = 5.55 + q * 2.2; z = -4 - q * 4;
+    } else if (prog < 20) {
+      // Across bridge
+      const q = (prog - 17) / 3;
+      x = -24 - q * 3; y = 7.75; z = -8;
+    } else {
+      // Down into DQA4
+      const q = (prog - 20) / 8;
+      x = -30 - q * 8; y = 7.75 - q * 4.5; z = -8 + q * 4;
+    }
+    p.mesh.position.set(x, y, z);
+    p.mesh.rotation.y = t * 0.5 + i;
+  });
+
+  // Cross-dock packages (moving from right to left along cross-dock strip)
+  xdockPkgs.forEach((p, i) => {
+    const prog = ((t * 2.5 + i * 7) % 28);
+    let x = 14 - prog * 1.4;
+    if (x < -27) x = 14;
+    p.mesh.position.x = x;
+    p.mesh.position.z = 4;
+    p.mesh.position.y = 0.55;
+  });
+
+  // Pulse belt lights
+  ptSVQ1.intensity = 1.2 + Math.sin(t * 2.0) * 0.3;
+  ptDQA4.intensity = 1.2 + Math.sin(t * 1.8 + 1) * 0.3;
+
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
